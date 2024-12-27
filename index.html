@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Volume Regulator</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background-color: #222; /* Default background */
+      color: #fff;
+      transition: background-color 0.2s ease-in-out; /* Smooth color transitions */
+      position: relative; /* For positioning the fullscreen exit button */
+    }
+
+    h1 {
+      margin: 20px 0 10px;
+      font-size: 24px;
+    }
+
+    #meterContainer {
+      margin: 0 auto;
+      width: 100%;
+      height: 200px;
+      background: #333;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    #volumeMeter {
+      display: block;
+    }
+
+    #scoreContainer {
+      margin: 20px 0;
+      font-size: 20px;
+    }
+
+    .scoreValue {
+      font-size: 30px;
+      color: #0f0; /* Green to encourage positivity */
+    }
+
+    /* Classes to change the entire page's background color */
+    body.normal {
+      background-color: #222;  /* Dark default */
+      color: #fff;
+    }
+    body.warning {
+      background-color: #FFEB00; /* Yellow */
+      color: #222;
+    }
+    body.danger {
+      background-color: #FF0000; /* Red */
+      color: #fff;
+    }
+
+    .controls, #fullscreenControls {
+      margin: 20px auto;
+      width: 80%;
+      max-width: 500px;
+      text-align: left;
+    }
+
+    .slider-group {
+      margin-bottom: 15px;
+    }
+    .slider-group label {
+      display: inline-block;
+      width: 160px;
+    }
+    .slider-group input[type="range"] {
+      width: 60%;
+      vertical-align: middle;
+    }
+
+    /* The fullscreen exit button (an “X” in the top-right corner) */
+    #exitFullscreenBtn {
+      display: none; /* Hidden by default; shown when in fullscreen */
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #444;
+      color: #fff;
+      font-size: 24px;
+      border: none;
+      border-radius: 4px;
+      padding: 5px 10px;
+      cursor: pointer;
+      z-index: 9999;
+    }
+  </style>
+</head>
+<body class="normal">
+  <h1>Volume Regulator</h1>
+  <p>Try to keep your voice in the safe zone and earn Quiet Points!</p>
+
+  <!-- Fullscreen toggle buttons -->
+  <div id="fullscreenControls">
+    <button id="fullscreenBtn">Go Fullscreen</button>
+  </div>
+  <button id="exitFullscreenBtn">X</button>
+
+  <!-- Sliders to adjust warning/danger thresholds -->
+  <div class="controls">
+    <div class="slider-group">
+      <label for="warningSlider">Warning Threshold: <span id="warningValue"></span></label>
+      <input 
+        type="range" 
+        id="warningSlider" 
+        min="0.01" max="0.3" step="0.01"
+      />
+    </div>
+    <div class="slider-group">
+      <label for="dangerSlider">Danger Threshold: <span id="dangerValue"></span></label>
+      <input 
+        type="range" 
+        id="dangerSlider" 
+        min="0.02" max="0.5" step="0.01"
+      />
+    </div>
+  </div>
+
+  <div id="meterContainer">
+    <canvas id="volumeMeter"></canvas>
+  </div>
+
+  <div id="scoreContainer">
+    Quiet Points: <span id="score" class="scoreValue">0</span>
+  </div>
+
+  <script>
+    // --- CONFIGURABLE VALUES ---
+    const HISTORY_SIZE = 600; // Number of past samples shown in the meter
+    const SCORE_INCREMENT_INTERVAL = 1000; // (ms) Earn Quiet Points every second if below warning threshold
+
+    // Thresholds (adjusted via sliders, stored in localStorage)
+    let warningThreshold;
+    let dangerThreshold;
+
+    // Track if we were previously above danger to avoid repeated point loss
+    let wasAboveDanger = false;
+
+    // DOM Elements
+    const warningSlider   = document.getElementById('warningSlider');
+    const dangerSlider    = document.getElementById('dangerSlider');
+    const warningValueEl  = document.getElementById('warningValue');
+    const dangerValueEl   = document.getElementById('dangerValue');
+    const scoreEl         = document.getElementById('score');
+    const canvas          = document.getElementById('volumeMeter');
+    const ctx             = canvas.getContext('2d');
+
+    const fsButton        = document.getElementById('fullscreenBtn');
+    const exitFsButton    = document.getElementById('exitFullscreenBtn');
+
+    // Audio Analysis
+    let audioContext;
+    let analyser;
+    let dataArray;
+    let bufferLength;
+
+    // Volume history (for line chart)
+    let volumeHistory = new Array(HISTORY_SIZE).fill(0);
+
+    // Score
+    let score = 0;
+
+    // -------------------------
+    // LOCAL STORAGE INIT
+    // -------------------------
+    const storedWarning = localStorage.getItem('warningThreshold');
+    const storedDanger  = localStorage.getItem('dangerThreshold');
+
+    // Default to 0.05 warning / 0.10 danger if not stored
+    warningThreshold = storedWarning ? parseFloat(storedWarning) : 0.05;
+    dangerThreshold  = storedDanger  ? parseFloat(storedDanger)  : 0.10;
+
+    // Set initial slider positions
+    warningSlider.value = warningThreshold;
+    dangerSlider.value  = dangerThreshold;
+    warningValueEl.textContent = warningThreshold.toFixed(2);
+    dangerValueEl.textContent  = dangerThreshold.toFixed(2);
+
+    // Sliders: update thresholds & store in localStorage
+    warningSlider.addEventListener('input', (e) => {
+      warningThreshold = parseFloat(e.target.value);
+      localStorage.setItem('warningThreshold', warningThreshold);
+      warningValueEl.textContent = warningThreshold.toFixed(2);
+
+      // If warning >= danger, bump danger
+      if (warningThreshold >= dangerThreshold) {
+        dangerThreshold = warningThreshold + 0.01;
+        if (dangerThreshold > 0.5) dangerThreshold = 0.5; // clamp
+        dangerSlider.value = dangerThreshold;
+        localStorage.setItem('dangerThreshold', dangerThreshold);
+        dangerValueEl.textContent = dangerThreshold.toFixed(2);
+      }
+    });
+
+    dangerSlider.addEventListener('input', (e) => {
+      dangerThreshold = parseFloat(e.target.value);
+      localStorage.setItem('dangerThreshold', dangerThreshold);
+      dangerValueEl.textContent = dangerThreshold.toFixed(2);
+
+      // If danger <= warning, lower warning
+      if (dangerThreshold <= warningThreshold) {
+        warningThreshold = dangerThreshold - 0.01;
+        if (warningThreshold < 0.01) warningThreshold = 0.01; // clamp
+        warningSlider.value = warningThreshold;
+        localStorage.setItem('warningThreshold', warningThreshold);
+        warningValueEl.textContent = warningThreshold.toFixed(2);
+      }
+    });
+
+    // ---------------------
+    // CANVAS INIT
+    // ---------------------
+    function initCanvasSize() {
+      canvas.width = document.getElementById('meterContainer').clientWidth;
+      canvas.height = 200;
+    }
+    initCanvasSize();
+
+    // ---------------------
+    // FULLSCREEN LOGIC
+    // ---------------------
+    fsButton.addEventListener('click', () => {
+      // Request fullscreen of the entire doc
+      // Alternatively: meterContainer.requestFullscreen()
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      }
+    });
+
+    exitFsButton.addEventListener('click', () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+    });
+
+    // When fullscreen changes, show/hide controls
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) {
+        // In fullscreen
+        document.querySelector('.controls').style.display = 'none';
+        document.getElementById('fullscreenControls').style.display = 'none';
+        exitFsButton.style.display = 'block';
+      } else {
+        // Exited fullscreen
+        document.querySelector('.controls').style.display = 'block';
+        document.getElementById('fullscreenControls').style.display = 'block';
+        exitFsButton.style.display = 'none';
+      }
+    });
+
+    // ---------------------
+    // AUDIO SETUP
+    // ---------------------
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then(handleSuccess)
+      .catch(handleError);
+
+    function handleSuccess(stream) {
+      audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      bufferLength = analyser.fftSize;
+      dataArray = new Uint8Array(bufferLength);
+
+      source.connect(analyser);
+
+      // Start the ~60fps update loop
+      requestAnimationFrame(updateVolumeMeter);
+
+      // Award quiet points every second if below warning threshold
+      setInterval(checkQuietTime, SCORE_INCREMENT_INTERVAL);
+    }
+
+    function handleError(err) {
+      console.error('Error accessing microphone:', err);
+      alert('Microphone access was denied. Cannot measure volume.');
+    }
+
+    // ---------------------
+    // MAIN LOOP
+    // ---------------------
+    function updateVolumeMeter() {
+      requestAnimationFrame(updateVolumeMeter);
+
+      // Get time-domain data
+      analyser.getByteTimeDomainData(dataArray);
+
+      // Compute RMS
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        let value = (dataArray[i] - 128) / 128.0;
+        sum += value * value;
+      }
+      const rms = Math.sqrt(sum / bufferLength);
+
+      // Update the history array
+      volumeHistory.shift();
+      volumeHistory.push(rms);
+
+      // Clear & draw the meter
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      const barWidth = canvas.width / HISTORY_SIZE;
+      for (let i = 0; i < HISTORY_SIZE; i++) {
+        const v = volumeHistory[i] * canvas.height;
+        const x = i * barWidth;
+        const y = canvas.height - v;
+        if (i === 0) ctx.moveTo(x, y);
+        else         ctx.lineTo(x, y);
+      }
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#0f0';
+      ctx.stroke();
+
+      // Check thresholds to set background color
+      if (rms > dangerThreshold) {
+        document.body.className = 'danger';
+
+        // Subtract 20 points once per crossing above danger
+        if (!wasAboveDanger) {
+          score = Math.max(score - 20, 0);
+          scoreEl.textContent = score;
+          wasAboveDanger = true;
+        }
+      } else if (rms > warningThreshold) {
+        document.body.className = 'warning';
+        wasAboveDanger = false;
+      } else {
+        document.body.className = 'normal';
+        wasAboveDanger = false;
+      }
+    }
+
+    // ---------------------
+    // QUIET POINTS
+    // ---------------------
+    function checkQuietTime() {
+      // If volume is below warning threshold, +1 point
+      const recentVolume = volumeHistory[volumeHistory.length - 1];
+      if (recentVolume < warningThreshold) {
+        score++;
+        scoreEl.textContent = score;
+      }
+    }
+  </script>
+</body>
+</html>
