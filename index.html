@@ -137,7 +137,8 @@
 
   <script>
     // --- CONFIGURABLE VALUES ---
-    const HISTORY_SIZE = 600; // Number of past samples shown in the meter
+    // The history size is now 3000 (5× 600) for a much longer timeline
+    const HISTORY_SIZE = 3000;
     const SCORE_INCREMENT_INTERVAL = 1000; // (ms) Earn Quiet Points every second if below warning threshold
 
     // Thresholds (adjusted via sliders, stored in localStorage)
@@ -165,7 +166,7 @@
     let dataArray;
     let bufferLength;
 
-    // Volume history (for line chart)
+    // Volume history (for line chart), now 3000 samples
     let volumeHistory = new Array(HISTORY_SIZE).fill(0);
 
     // Score
@@ -231,8 +232,7 @@
     // FULLSCREEN LOGIC
     // ---------------------
     fsButton.addEventListener('click', () => {
-      // Request fullscreen of the entire doc
-      // Alternatively: meterContainer.requestFullscreen()
+      // Request fullscreen of the entire document
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen();
       }
@@ -310,8 +310,10 @@
       volumeHistory.shift();
       volumeHistory.push(rms);
 
-      // Clear & draw the meter
+      // Clear the canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 1) Draw the volume history as a line
       ctx.beginPath();
       const barWidth = canvas.width / HISTORY_SIZE;
       for (let i = 0; i < HISTORY_SIZE; i++) {
@@ -325,7 +327,29 @@
       ctx.strokeStyle = '#0f0';
       ctx.stroke();
 
-      // Check thresholds to set background color
+      // 2) Draw threshold lines (warning & danger)
+      const warningY = canvas.height - (warningThreshold * canvas.height);
+      const dangerY  = canvas.height - (dangerThreshold  * canvas.height);
+
+      // Warning line (yellow dashed line)
+      ctx.beginPath();
+      ctx.setLineDash([5, 5]);
+      ctx.moveTo(0, warningY);
+      ctx.lineTo(canvas.width, warningY);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'yellow';
+      ctx.stroke();
+
+      // Danger line (red dashed line)
+      ctx.beginPath();
+      ctx.moveTo(0, dangerY);
+      ctx.lineTo(canvas.width, dangerY);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'red';
+      ctx.stroke();
+      ctx.setLineDash([]); // reset line dash
+
+      // 3) Check thresholds to set background color and handle scoring logic
       if (rms > dangerThreshold) {
         document.body.className = 'danger';
 
