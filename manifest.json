@@ -1,23 +1,23 @@
 {
-    "name": "Volume Hero",
-    "short_name": "VolHero",
+    "name": "Volume Hero - Voice Regulator",
+    "short_name": "Volume Hero",
     "start_url": "./index.html",
     "display": "standalone",
     "background_color": "#222222",
     "theme_color": "#222222",
     "icons": [
       {
-        "src": "icons/180.png",
+        "src": "icon-180.png",
         "type": "image/png",
         "sizes": "180x180"
       },
       {
-        "src": "icons/192.png",
+        "src": "icon-192.png",
         "type": "image/png",
         "sizes": "192x192"
       },
       {
-        "src": "icons/512.png",
+        "src": "icon-512.png",
         "type": "image/png",
         "sizes": "512x512"
       }
