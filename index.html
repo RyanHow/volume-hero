@@ -283,7 +283,7 @@
     // ---------------------
     // AUDIO SETUP
     // ---------------------
-    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false, echoCancellation: true, noiseSuppression: true, autoGainControl: false })
       .then(handleSuccess)
       .catch(handleError);
 
